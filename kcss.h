@@ -126,7 +126,7 @@ private:
 public:
 
 	KCSS() :
-		VAL_SAVED(), TAGS(), _thread_id(), _my_tag() {
+		VAL_SAVED(), TAGS(), _thread_id() {
 	}
 
 	template<typename T, class Enabled = void> //TODO what is Enabled for?
@@ -351,7 +351,5 @@ private:
 	uint16_t TAGS[MAX_THREAD_ID];
 
 	std::atomic<uint16_t> _thread_id;
-	std::atomic<uint16_t> _my_tag;
-
 };
 

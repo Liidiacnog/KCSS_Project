@@ -1,226 +1,210 @@
+#include <chrono>
+#include <iomanip>
 #include <iostream>
-#include <atomic>
 #include "kcss.h"
 #include <thread>
+#include <chrono>
 
+using std::__1::chrono::high_resolution_clock;
+using std::__1::chrono::microseconds;
+using namespace std::chrono_literals;
 
-void test0() {
-	KCSS kcss_inst;
+void test0(std::size_t n) {
+	KCSS m;
 
 	KCSS::loc_t<int> v1(10);
 	KCSS::loc_t<int> v2(20);
 	KCSS::loc_t<int> v3(30);
 
-	std::thread t1([&]() { // TODO what is the "&" ?
-		for (int i = 0; i < 100; i++)
-			if (kcss_inst.kcss(v1, i, i + 1, KCSS::mp(v2, 20), KCSS::mp(v3, 30))) {
-				std::cout << "t1 changed v1 to: " << i + 1 << std::endl;
-			}
-	});
 
-	std::thread t2([&]() {
-		for (int i = 0; i < 150; i++) {
-			if (kcss_inst.kcss(v1, i, 2 * i, KCSS::mp(v2, 20), KCSS::mp(v3, 30))) {
-				std::cout << "t2 changed v1 to: " << 2 * i << std::endl;
-			}
+	auto f = [&]() {
+		while (true) {
+			int x = m.get(v1);
+			if (x > 1000000)
+				break;
+			m.kcss(v1, x, x + 1, KCSS::mp(v2, 20), KCSS::mp(v3, 30));
+			// m.kcss(v1, x, x + 1);
 		}
-	});
-
-	t1.join();
-	t2.join();
-
-	std::cout << std::endl << "final value of v1 is: " << kcss_inst.get(v1) << std::endl;
-
-}
-
-
-void test1() {
-	KCSS kcss_inst;
-
-	KCSS::loc_t<int> v1(0);
-	KCSS::loc_t<int> v2(20);
-	KCSS::loc_t<int> v3(30);
-
-	std::thread t1([&]() { // TODO what is the "&" ?
-		for (int i = 1; i <= 100; i++){
-			int exp = kcss_inst.get(v1);
-			if (kcss_inst.kcss(v1, exp, 1, KCSS::mp(v2, 20), KCSS::mp(v3, 30))) {
-				std::cout << "t1 -> Iteration " << i << ": t1 saw " << exp << " and changed v1 to: " << 1 << std::endl;
-			}
-		}
-	});
-
-	std::thread t2([&]() {
-		for (int i = 1; i <= 100; i++){
-			int exp = kcss_inst.get(v1);
-			if (kcss_inst.kcss(v1, exp, 2, KCSS::mp(v2, 20), KCSS::mp(v3, 30))) {
-				std::cout << "t2 -> Iteration " << i << ": t2 saw " << exp << " and changed v1 to: " << 2 << std::endl;
-			}
-		}
-	});
-
-	t1.join();
-	t2.join();
-
-	std::cout << std::endl << "Final value of v1 is: " << kcss_inst.get(v1) << std::endl;
-}
-
-
-void test_modify_nodes() { 
-	struct node{
-		node(int e, node* n): 
-			elem(e), next(n) {}
-			
-		int elem;
-		node* next;
 	};
 
-	// 1 -> 2 -> 3 -> nullptr
-	node n3(3, nullptr);
-	node n2(2, &n3);
-	node n1(1, &n2);
+	std::thread t[n];
+	for (auto i = 0u; i < 5; i++)
+		t[i] = std::thread(f);
+	for (auto i = 0u; i < 5; i++)
+		t[i].join();
 
-    // std::cout << std::endl << "sizeof node: " << sizeof(node) << std::endl;
-	// std::cout << std::endl << "sizeof node*: " << sizeof(node*) << std::endl;
-	// std::cout << std::endl << "sizeof: node" << sizeof(node) << std::endl;
 
-	KCSS kcss_inst;
+//	std::cout << std::endl << "final value of v1 is: " << m.get(v1)
+//			<< std::endl;
 
-	KCSS::loc_t<node*> v1(n1.next);
-	KCSS::loc_t<node*> v2(n2.next);
-	KCSS::loc_t<node*> v3(n3.next);
-
-	std::cout << "Initial address of n2: " << &n2 << std::endl;
-	std::cout << "Initial address of n3: " << &n3 << std::endl;
-
-	//trying to delete n2
-	node* new_n1_next = &n3;
-	std::thread t1([&]() { // TODO what is the "&" ?
-	for (int i = 1; i <= 10; i++){
-		node* exp_next_n2 = kcss_inst.get(v2);
-		if (kcss_inst.kcss(v1, &n2, new_n1_next, KCSS::mp(v2, exp_next_n2), KCSS::mp(v3, n3.next))) {
-			std::cout << "Iteration " << i << ": t1 changed v1 to: " << new_n1_next << std::endl;
-		}
-	}
-	});
-
-	//trying to add a new node between n2 and n3
-	node n2_3(4, &n3);
-	std::thread t2([&]() {
-		for (int i = 1; i <= 10; i++){
-			node* exp_next_n1 = kcss_inst.get(v1);
-			if (kcss_inst.kcss(v2, &n3, &n2_3, KCSS::mp(v1, exp_next_n1), KCSS::mp(v3, n3.next))) {
-				std::cout << "Iteration " << i << ": t2 changed v2 to: " << &n2_3 << std::endl;
-			}
-		}
-	});
-
-	t1.join();
-	t2.join();
-
-	std::cout << std::endl << "Final value of v1 is: " << kcss_inst.get(v1) << std::endl;
-	std::cout << std::endl << "Final value of v2 is: " << kcss_inst.get(v1) << std::endl;
-	
-	//Critical section ended. Now update values of nodes with those managed by KCSS //TODO This way of updating real values doesn't scale
-
-	std::cout << std::endl << "Initial state of list was: " << std::endl;
-	std::cout << "n1: " << &n1 << " : (" << n1.elem << ", " << n1.next << ") -> " << std::endl;
-	std::cout << "n2: " << &n2 << " : (" << n2.elem << ", " << n2.next << ") -> " << std::endl;
-	std::cout << "n3: " << &n3 << " : (" << n3.elem << ", " << n3.next << ") -> " << std::endl;
-
-	n1.next = v1.from_value_t(v1.val);
-	n2.next = v1.from_value_t(v2.val);
-	n3.next = v1.from_value_t(v3.val);
-	// n2_3.next = 
-
-	std::cout << std::endl << "Final value of list is: " << std::endl;
-	std::cout << "n1: " << &n1 << " : (" << n1.elem << ", " << n1.next << ") -> " << std::endl;
-	std::cout << "n2: " << &n2 << " : (" << n2.elem << ", " << n2.next << ") -> " << std::endl;
-	std::cout << "n2_3: " << &n2_3 << " : (" << n2_3.elem << ", " << n2_3.next << ") -> " << std::endl;
-	std::cout << "n3: " << &n3 << " : (" << n3.elem << ", " << n3.next << ") -> " << std::endl;
 }
 
 
-/* void test_modify_nodes2() { 
-	struct node{
-		node(int e, node* n): 
-			elem(e), next(n) {}
-			
-		int elem;
-		node* next;
+
+bool mutexcas(int *p, int expv, int newv, std::mutex &m) {
+	m.lock();
+	bool res = false;
+	if (*p == expv) {
+		*p = newv;
+		res = true;
+	}
+	m.unlock();
+	return res;
+}
+
+void test1(std::size_t n) {
+
+	std::mutex m;
+
+	int x = 10;
+
+	auto f = [&]() {
+		bool done = 0;
+		while (!done) {
+			if (x > 1000000)
+				break;
+			mutexcas(&x, x, x + 1, m);
+//			m.lock();
+//			if (y == 20 && z == 30) {
+//				x += 1;
+//			}
+//			m.unlock();
+		}
 	};
 
-	1 -> 2 -> 3 -> nullptr
-	node n3(3, nullptr);
-	node n2(2, &n3);
-	node n1(1, &n2);
-
-    std::cout << std::endl << "sizeof node: " << sizeof(node) << std::endl;
-	std::cout << std::endl << "sizeof node*: " << sizeof(node*) << std::endl;
-	std::cout << std::endl << "sizeof: node" << sizeof(node) << std::endl;
-
-	KCSS kcss_inst;
-
-	KCSS::loc_t<node**> v1(&n1.next);
-	KCSS::loc_t<node**> v2(&n2.next);
-	KCSS::loc_t<node**> v3(&n3.next);
-
-	std::cout << "Initial address of n2: " << &n2 << std::endl;
-	std::cout << "Initial address of n3: " << &n3 << std::endl;
-
-	trying to delete n2
-	node* new_n1_next = &n3;
-	std::thread t1([&]() { // TODO what is the "&" ?
-	for (int i = 1; i <= 10; i++){
-		node** exp_next_n2 = kcss_inst.get(v2);
-		if (kcss_inst.kcss(v1, &n2, new_n1_next, KCSS::mp(v2, exp_next_n2), KCSS::mp(v3, n3.next))) {
-			std::cout << "Iteration " << i << ": t1 changed v1 to: " << new_n1_next << std::endl;
-		}
-	}
-	});
-
-	trying to add a new node between n2 and n3
-	node n2_3(4, &n3);
-	std::thread t2([&]() {
-		for (int i = 1; i <= 10; i++){
-			node* exp_next_n1 = kcss_inst.get(v1);
-			if (kcss_inst.kcss(v2, &n3, &n2_3, KCSS::mp(v1, exp_next_n1), KCSS::mp(v3, n3.next))) {
-				std::cout << "Iteration " << i << ": t2 changed v2 to: " << &n2_3 << std::endl;
-			}
-		}
-	});
-
-	t1.join();
-	t2.join();
-
-	std::cout << std::endl << "Final value of v1 is: " << kcss_inst.get(v1) << std::endl;
-	std::cout << std::endl << "Final value of v2 is: " << kcss_inst.get(v1) << std::endl;
 	
-	Critical section ended. Now update values of nodes with those managed by KCSS //TODO This way of updating real values doesn't scale
+	std::thread t[n];
+	for (auto i = 0u; i < 5; i++)
+		t[i] = std::thread(f);
+	for (auto i = 0u; i < 5; i++)
+		t[i].join();
 
-	std::cout << std::endl << "Initial state of list was: " << std::endl;
-	std::cout << "n1: " << &n1 << " : (" << n1.elem << ", " << n1.next << ") -> " << std::endl;
-	std::cout << "n2: " << &n2 << " : (" << n2.elem << ", " << n2.next << ") -> " << std::endl;
-	std::cout << "n3: " << &n3 << " : (" << n3.elem << ", " << n3.next << ") -> " << std::endl;
 
-	n1.next = v1.from_value_t(v1.val);
-	n2.next = v1.from_value_t(v2.val);
-	n3.next = v1.from_value_t(v3.val);
-	n2_3.next = 
+//	std::cout << std::endl << "final value of x is: " << x << std::endl;
 
-	std::cout << std::endl << "Final value of list is: " << std::endl;
-	std::cout << "n1: " << &n1 << " : (" << n1.elem << ", " << n1.next << ") -> " << std::endl;
-	std::cout << "n2: " << &n2 << " : (" << n2.elem << ", " << n2.next << ") -> " << std::endl;
-	std::cout << "n2_3: " << &n2_3 << " : (" << n2_3.elem << ", " << n2_3.next << ") -> " << std::endl;
-	std::cout << "n3: " << &n3 << " : (" << n3.elem << ", " << n3.next << ") -> " << std::endl;
 }
- */
+
+void foo() {
+	struct double_layout {
+		uint64_t mantisa :52;
+		uint64_t exp :11;
+		uint64_t sign :1;
+	};
+
+	union {
+		double d;
+		double_layout dl;
+	};
+
+	d = 0.123456789;
+	std::cout << dl.mantisa << std::endl;
+	std::cout << dl.exp << std::endl;
+	std::cout << dl.sign << std::endl;
+
+	KCSS::loc_t<double> v1;
+	uint64_t d1 = v1.to_value_t(d);
+	double d2 = v1.from_value_t(d1);
+	std::cout.precision(std::numeric_limits<double>::max_digits10);
+	std::cout << d << std::endl;
+	std::cout << d2 << std::endl;
+	std::cout << std::bitset<64>(*reinterpret_cast<uint64_t*>(&d)) << std::endl;
+	std::cout << std::bitset<64>(*reinterpret_cast<uint64_t*>(&d2))
+			<< std::endl;
+
+	if (d == d2)
+		std::cout << "Yes!" << std::endl;
+
+	long double bla = 1.3523345345345345;
+	std::cout << sizeof(bla) << " " << bla << std::endl;
+}
+
+void test_0() {
+	auto t1 = high_resolution_clock::now();
+	test0(20);
+	auto t2 = high_resolution_clock::now();
+	test1(20);
+	auto t3 = high_resolution_clock::now();
+
+	auto d1 = duration_cast<microseconds>(t2 - t1);
+	auto d2 = duration_cast<microseconds>(t3 - t2);
+	std::cout << d1.count() << std::endl;
+	std::cout << d2.count() << std::endl;
+	std::cout << d1.count() * 1.0 / d2.count() << std::endl;
+
+}
+
+void bar() {
+
+	KCSS m;
+
+	struct node {
+		node() :
+				x(0), next(nullptr) {
+		}
+		KCSS::loc_t<int> x;
+		KCSS::loc_t<node*> next;
+	};
+
+	node *n1 = new node();
+	node *n2 = new node();
+
+	m.kcss(n1->next, (node*) nullptr, n2);
+
+}
+
+int sum(int x) {
+	int s = 0;
+	for (int i = 0; i < x; ++i)
+		s += i;
+	return s;
+}
+
+// sum(5)  sum1<5>()
+
+template<int x>
+inline int sum1() {
+	return x + sum1<x - 1>();
+}
+
+template<>
+inline int sum1<0>() {
+	return 0;
+}
+
+
+
+template<typename ...Ts>
+void f(Ts &&...args) {
+}
 
 
 int main() {
 
-	// test0();
-	test_modify_nodes();
-	// test1();
+	int x;
+	f(x, 1, 2);
+
+	std::cout << sum1<10>() << std::endl;
+
+	struct ff {
+		int8_t v :7;
+		int8_t x :1;
+
+	};
+
+	ff a;
+	a.x = 0;
+	a.v = -65;
+
+	int8_t y = a.v;
+
+	std::cout << std::bitset<8>(-65) << std::endl;
+
+	std::cout << std::bitset<8>(*reinterpret_cast<int8_t*>(&a)) << std::endl;
+	std::cout << std::bitset<8>(y) << std::endl;
+
+	exit(0);
+	for (auto i = 0u; i < 10; ++i)
+		test_0();
+//	foo();
 }
 

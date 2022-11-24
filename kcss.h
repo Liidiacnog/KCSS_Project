@@ -2,7 +2,6 @@
 #include <thread>
 #include <atomic>
 #include <map>
-// #include <stdatomic.h>
 #include <cassert>
 #include <sstream>
 #include <utility>
@@ -10,44 +9,50 @@
 class KCSS {
 private:
 
-	struct loc_t_b {
-		loc_t_b() : //Constructor 1. Empty
-			tid(0), val(0) {}
-		loc_t_b(uint64_t v) : //Constructor 2. Known val
-			tid(0), val(v) {}
+	struct loc_t_base {
+		loc_t_base() noexcept :
+				tid(0), val(0) {
+		}
+		loc_t_base(uint64_t v) noexcept :
+				tid(0), val(v) {
+		}
 		uint64_t tid;
 		uint64_t val;
 	};
 
 	struct TagType {
-		uint64_t tagged :1; // TODO why uint64?
-		uint64_t pid    :15;// TODO why uint64?
-		uint64_t tag    :48;
+		uint64_t tagged :1;
+		uint64_t pid :15;
+		uint64_t tag :48;
 	};
 	static_assert( sizeof(TagType) == 8 );
 
-	bool tagged_id(uint64_t v) {
+	constexpr inline bool tagged_id(uint64_t v) const noexcept {
 		return (v & 0x0000000000000001) == 1;
 	}
 
-	inline bool CAS(uint64_t *p, uint64_t exp, uint64_t des) {
+	inline bool cas(uint64_t *p, uint64_t exp, uint64_t des) noexcept {
 		return __sync_bool_compare_and_swap(p, exp, des);
 	}
 
-	uint16_t id(uint64_t v) {
-		TagType vt;
-		*reinterpret_cast<uint64_t*>(&vt) = static_cast<uint64_t>(v); //TODO is static_cast<uint64_t> needed?
+	constexpr inline uint16_t id(uint64_t v) const noexcept {
+		union {
+			TagType vt;
+			uint64_t a;
+		};
+		a = v;
 		return vt.pid;
+
 	}
 
-	void reset(loc_t_b *a) {
+	inline void reset(loc_t_base *a) noexcept {
 		uint64_t oldval = a->val;
 		if (tagged_id(oldval)) {
-			CAS(&a->val, oldval, VAL_SAVED[id(oldval)]);  // CAS
+			cas(&a->val, oldval, VAL_SAVED[id(oldval)]);  // CAS
 		}
 	}
 
-	uint64_t read(loc_t_b *a) {
+	inline uint64_t read(loc_t_base *a) noexcept {
 		while (true) {
 			uint64_t val = a->val;
 			if (!tagged_id(val))
@@ -56,61 +61,124 @@ private:
 		}
 	}
 
-	uint64_t create_tagged_value(uint16_t pid, uint64_t tag) { //TODO pid is uint16 instead of uint64 (coherence)
-		TagType vt;
+	inline constexpr uint64_t create_tagged_value(uint16_t pid,
+			uint64_t tag) const noexcept {
+		union {
+			TagType vt;
+			uint64_t a;
+		};
+
 		vt.pid = pid;
 		vt.tag = tag;
 		vt.tagged = 1;
 
-		return *reinterpret_cast<uint64_t*>(&vt); 
-		//TODO better to use memcpy or bit_cast? I don't understand the problem described in:
-		// https://en.cppreference.com/w/cpp/language/reinterpret_cast
+		return a;
 	}
 
-	inline uint16_t thread_id() {
-		thread_local static uint16_t id = _thread_id++; //initialized only once, rest of the times skipped.
+	uint16_t thread_id() noexcept {
+		thread_local static uint16_t id = _thread_id++;
 		return id;
 	}
 
-	uint64_t ll(loc_t_b *a) {
+	inline uint64_t ll(loc_t_base *a) noexcept {
 		while (true) {
 			TAGS[thread_id()]++;
 			uint64_t oldVal = read(a);
 			VAL_SAVED[thread_id()] = oldVal;
-			uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]);
-			if (CAS(&a->val, oldVal, tag_id)) {
+			uint64_t tag_id = create_tagged_value(thread_id(),
+					TAGS[thread_id()]);
+			if (cas(&a->val, oldVal, tag_id)) {
 				a->tid = tag_id;
 				return oldVal;
 			}
 		}
 	}
 
-	bool sc(loc_t_b *a, uint64_t newval) {
+	inline bool sc(loc_t_base *a, uint64_t newval) noexcept {
 		uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]);
-		return CAS(&a->val, tag_id, newval);
+		return cas(&a->val, tag_id, newval);
 	}
 
-	void collect_taggeds_ids(const std::size_t k, loc_t_b **a, uint64_t *ta) {
+	template<std::size_t k>;
+	inline constexpr void collect_tagged_ids_(loc_t_base **a,
+			uint64_t *ta) const noexcept {
+		collect_tagged_ids_<k - 1>(a, ta);
+		ta[k - 1] = a[k - 1]->tid;
+	}
+
+	template<>
+	inline constexpr void collect_tagged_ids_<0>(loc_t_base**,
+			uint64_t*) const noexcept {
+	}
+
+	template<std::size_t k>
+	inline void collect_values_(loc_t_base **a, uint64_t *va) noexcept {
+		collect_values_<k - 1>(a, va);
+		va[k - 1] = read(a[k - 1]);
+	}
+
+	template<>
+	inline void collect_values_<0>(loc_t_base**, uint64_t*) noexcept {
+	}
+
+	template<std::size_t k>
+	inline bool eval_cond_(uint64_t *va, uint64_t *vb, uint64_t *ta,
+			uint64_t *tb) noexcept {
+		return eval_cond_<k - 1>(va, vb, ta, tb) && ta[k - 1] == tb[k - 1]
+				&& va[k - 1] == vb[k - 1];
+	}
+
+	template<>
+	inline bool eval_cond_<0>(uint64_t*, uint64_t*, uint64_t*,
+			uint64_t*) noexcept {
+		return true;
+	}
+
+	template<std::size_t k>
+	inline void snapshot_(loc_t_base **a, uint64_t *va) noexcept {
+		uint64_t ta[k], tb[k];
+		uint64_t vb[k];
+
+		while (true) {
+			collect_tagged_ids_<k>(a, ta);
+			collect_values_<k>(a, va);
+			collect_values_<k>(a, vb);
+			collect_tagged_ids_<k>(a, tb);
+
+			if (eval_cond_<k>(va, vb, ta, tb))
+				return;
+		}
+
+		return;
+	}
+
+	template<>
+	inline void snapshot_<0>(loc_t_base**, uint64_t*) noexcept {
+	}
+
+	inline constexpr void collect_tagged_ids(const std::size_t k,
+			loc_t_base **a, uint64_t *ta) const noexcept {
 		for (unsigned int i = 0; i < k; ++i) {
 			ta[i] = a[i]->tid;
 		}
 	}
 
-	void collect_values(const std::size_t k, loc_t_b **a, uint64_t *va) {
+	inline void collect_values(const std::size_t k, loc_t_base **a,
+			uint64_t *va) noexcept {
 		for (unsigned int i = 0; i < k; ++i) {
 			va[i] = read(a[i]);
 		}
 	}
 
-	void snapshot(const std::size_t k, loc_t_b **a, uint64_t *va) {
+	inline void snapshot(std::size_t k, loc_t_base **a, uint64_t *va) noexcept {
 		uint64_t ta[k], tb[k];
 		uint64_t vb[k];
 
 		while (true) {
-			collect_taggeds_ids(k, a, ta);
+			collect_tagged_ids(k, a, ta);
 			collect_values(k, a, va);
 			collect_values(k, a, vb);
-			collect_taggeds_ids(k, a, tb);
+			collect_tagged_ids(k, a, tb);
 
 			unsigned i = 0;
 			while (i < k && ta[i] == tb[i] && va[i] == vb[i])
@@ -123,46 +191,58 @@ private:
 		return;
 	}
 
-public:
-
-	KCSS() :
-		VAL_SAVED(), TAGS(), _thread_id() {
+	template<std::size_t k>
+	inline bool eval_kcss_cond_(uint64_t *oldValues, uint64_t *expVals) noexcept {
+		return eval_kcss_cond_<k - 1>(oldValues, expVals)
+				|| oldValues[k - 1] != expVals[k - 1];
 	}
 
-	template<typename T, class Enabled = void> //TODO what is Enabled for?
+	template<>
+	inline bool eval_kcss_cond_<0>(uint64_t*, uint64_t*) noexcept {
+		return false;
+	}
+
+public:
+
+	KCSS() noexcept :
+			VAL_SAVED(), TAGS(), _thread_id() {
+	}
+
+	template<typename T, class Enabled = void>
 	struct loc_t;
 
-	// uint64_t and int64_t
+
+// uint64_t and int64_t
 	template<typename T>
 	struct loc_t<T,
 			std::enable_if_t<
-					std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>>> : loc_t_b {
-		struct bla {
+					std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>>> : loc_t_base {
+		struct t63 {
 			T p :1;
 			T v :63;
 		};
 
-		loc_t() : //Constructor 1. Empty
-			loc_t_b() {
+		loc_t() noexcept :
+				loc_t_base() {
 		}
 
-		loc_t(T v) : //Cosntructor 2. Known val
-			loc_t_b(to_value_t(v)) {
+		loc_t(T v) noexcept :
+				loc_t_base(to_value_t(v)) {
 		}
 
-		inline uint64_t to_value_t(T v) {
-			union { //TODO why union, then assign values to x but then return _x?
-				bla x;
+		constexpr inline uint64_t to_value_t(T v) const noexcept {
+			union {
+				t63 x;
 				uint64_t _x;
 			};
-			x.p = 0; // TODO is this the tagged bit?
+			x.p = 0;
 			x.v = v;
-			return _x; 
+			return _x;
 		}
 
-		inline T from_value_t(uint64_t v) { //TODO same as above
+		constexpr inline T from_value_t(uint64_t v) const noexcept {
 			union {
-				bla x;
+				t63 x;
 				uint64_t _x;
 			};
 			_x = v;
@@ -171,22 +251,23 @@ public:
 
 	};
 
-	// any numeric type of size smaller than 8 bytes //TODO use case?
+// any numeric type of size smaller than 8 bytes
 	template<typename T>
 	struct loc_t<T,
 			std::enable_if_t<
 					(std::is_integral_v<T> || std::is_floating_point_v<T>)
-							&& (sizeof(T) < 8)>> : loc_t_b {
+							&& (sizeof(T) < 8)>> : loc_t_base {
 
-		loc_t() :
-				loc_t_b() {
+		loc_t() noexcept :
+				loc_t_base() {
 		}
 
-		loc_t(T v) :
-				loc_t_b(to_value_t(v)) {
+		loc_t(T v) noexcept :
+				loc_t_base(to_value_t(v)) {
 		}
 
-		inline uint64_t to_value_t(T v) {
+		constexpr inline uint64_t to_value_t(T v) const noexcept {
+
 			union {
 				struct {
 					uint8_t p;
@@ -200,7 +281,7 @@ public:
 			return a1;
 		}
 
-		inline T from_value_t(uint64_t v) {
+		constexpr inline T from_value_t(uint64_t v) const noexcept {
 			union {
 				struct {
 					uint8_t p;
@@ -209,132 +290,120 @@ public:
 				uint64_t a1;
 			};
 			a1 = v;
-			
 			return t.a2;
 		}
 
 	};
 
-	// trying to handle double by taking 1 bit from the mantissa, does not work well since
-	// the values in the mantissa are really weird (they are very large even for small values)
-	//
-	// FIXME template<> 
-/* 	struct loc_t<double> : loc_t_b { //TODO why doesn't it compile?
+// Trying to handle double by stealing 1 bit from the mantissa. We steal the least
+// significant bit which is the one affects the precision less, since it contributes
+// 2^(-52) to the decimals -- see the following for more information:
+//
+//   https://en.wikipedia.org/wiki/Double-precision_floating-point_format
+//
+	template<>
+	struct loc_t<double> : loc_t_base {
 
-		loc_t() :
-				loc_t_b() {
+		loc_t() noexcept :
+				loc_t_base() {
 		}
 
-		loc_t(double v) :
-				loc_t_b(to_value_t(v)) {
+		loc_t(double v) noexcept :
+				loc_t_base(to_value_t(v)) {
 		}
 
-		struct double_layout {
-			uint64_t mantisa :52;
-			uint64_t exp :11;
-			uint64_t sign :1;
-		};
-
-		struct double63_layout {
-			uint64_t p :1;
-			uint64_t mantisa :51;
-			uint64_t exp :11;
-			uint64_t sign :1;
-		};
-
-		inline uint64_t to_value_t(double v) {
+		constexpr inline uint64_t to_value_t(double v) const noexcept {
 			union {
-				double_layout d1;
 				double a1;
-			};
-			union {
-				double63_layout d2;
 				uint64_t a2;
 			};
-
 			a1 = v;
-			d2.p = 0;
-			d2.sign = d1.sign;
-			d2.exp = d1.exp;
-			d2.mantisa = d1.mantisa;
+			a2 = a2 & 0xfffffffffffffffe; // turn the least significant bit of the mantissa to 0
 
 			return a2;
 
 		}
 
-		inline double from_value_t(uint64_t v) {
+		constexpr inline double from_value_t(uint64_t v) const noexcept {
 			union {
-				double_layout d1;
+				uint64_t a2;
 				double a1;
 			};
-			union {
-				double63_layout d2;
-				uint64_t a2;
-			};
 			a2 = v;
-			d1.sign = d2.sign;
-			d1.exp = d2.exp;
-			d1.mantisa = d2.mantisa;
 			return a1;
 		}
-	}; */
+	};
 
-	// pointers
+// pointers
 	template<typename T>
-	struct loc_t<T*> : loc_t_b {
+	struct loc_t<T*> : loc_t_base {
 
-		loc_t() :
-			loc_t_b() {
+		loc_t() noexcept :
+				loc_t_base() {
 		}
 
-		loc_t(T* v) : //TODO has to be T * ?
-			loc_t_b(to_value_t(v)) {
+		explicit loc_t(T *v) noexcept :
+				loc_t_base(to_value_t(v)) {
 		}
 
-		inline uint64_t to_value_t(T *v) {
+		constexpr inline uint64_t to_value_t(T *v) const noexcept {
 			static_assert( (alignof(T) & 1) == 0 );
-			// T's alignof must be even
-			assert((reinterpret_cast<uint64_t>(v) & 1) == 0);// pointer must be aligned to even address
-			return reinterpret_cast<uint64_t>(v);
+			union {
+				T *v_aux;
+				uint64_t a;
+			};
+			v_aux = v;
+			assert((a & 1) == 0); // pointer must be aligned to even address
+			return a;
 		}
-		
-		inline T* from_value_t(uint64_t v) {
-			return reinterpret_cast<T*>(v);
+		constexpr inline T* from_value_t(uint64_t v) const noexcept {
+			union {
+				T *a;
+				uint64_t v_aux;
+			};
+			v_aux = v;
+			return a;
 		}
 	};
 
 	template<typename T>
-	static std::pair<loc_t<T>&, T> mp(loc_t<T> &a, T b) {
+	constexpr static std::pair<loc_t<T>&, T> mp(loc_t<T> &a, T b) noexcept {
 		return std::move(std::pair<loc_t<T>&, T>(a, b));
 	}
 
 	template<typename T>
-	inline T get(loc_t<T> &a) {
+	inline T get(loc_t<T> &a) noexcept {
 		return a.from_value_t(read(&a));
 	}
 
 	template<typename T0, typename ...Ts>
-	bool kcss(loc_t<T0> &a0, T0 a0_expv, T0 a0_newv, Ts &&...args) {
+	bool kcss(loc_t<T0> &a0, T0 a0_expv, T0 a0_newv, Ts &&...args) noexcept {
 
 		constexpr std::size_t k = sizeof...(args) + 1;
 
 		uint64_t oldValues[k];
 		uint64_t expVals[k] = { a0.to_value_t(a0_expv),
 				(args.first.to_value_t(args.second))... };
-		loc_t_b *a[k] = { &a0, (&args.first)... };
+		loc_t_base *a[k] = { &a0, (&args.first)... };
 		uint64_t newVal = a0.to_value_t(a0_newv);
 
 		while (true) {
 			oldValues[0] = ll(a[0]);
-			snapshot(k - 1, a + 1, oldValues + 1);
 
-			for (unsigned int i = 0; i < k; ++i) {
-				if (oldValues[i] != expVals[i]) {
-					sc(a[0], oldValues[0]);
-					return false;
-				}
+			snapshot_<k - 1>(a + 1, oldValues + 1);
+			if (eval_kcss_cond_<k>(oldValues, expVals)) {
+				sc(a[0], oldValues[0]);
+				return false;
 			}
-			// Try to commit
+
+//			snapshot(k - 1, a + 1, oldValues + 1);
+//			for (unsigned int i = 0; i < k; ++i) {
+//				if (oldValues[i] != expVals[i]) {
+//					sc(a[0], oldValues[0]);
+//					return false;
+//				}
+//			}
+
 			if (sc(a[0], newVal)) {
 				return true;
 			}
@@ -351,5 +420,6 @@ private:
 	uint16_t TAGS[MAX_THREAD_ID];
 
 	std::atomic<uint16_t> _thread_id;
+
 };
 

@@ -68,18 +68,16 @@ private:
 	}
 
 	inline uint16_t thread_id() {
-		thread_local static uint16_t id = _thread_id++; 
-		//TODO should every call to thread_id() increment it?, paper differentiates between mytag 
-		// (varies, it is used as timestamp), and mypid (fixed)
+		thread_local static uint16_t id = _thread_id++; //initialized only once, rest of the times skipped.
 		return id;
 	}
 
 	uint64_t ll(loc_t_b *a) {
 		while (true) {
-			TAGS[thread_id()]++; //TODO correct, except continuous increment of thread_id. Why do the operations still work?
+			TAGS[thread_id()]++;
 			uint64_t oldVal = read(a);
-			VAL_SAVED[thread_id()] = oldVal; //TODO same as above
-			uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]); //TODO same as above x2
+			VAL_SAVED[thread_id()] = oldVal;
+			uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]);
 			if (CAS(&a->val, oldVal, tag_id)) {
 				a->tid = tag_id;
 				return oldVal;
@@ -88,10 +86,8 @@ private:
 	}
 
 	bool sc(loc_t_b *a, uint64_t newval) {
-		uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]); //TODO same as above
+		uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]);
 		return CAS(&a->val, tag_id, newval);
-		//TODO isn't it always going to be false bc of new thread_id values each time?, 
-		// unless threads coincide in a thread_id nr when they are each incrementing their own local variable.
 	}
 
 	void collect_taggeds_ids(const std::size_t k, loc_t_b **a, uint64_t *ta) {
@@ -130,7 +126,7 @@ private:
 public:
 
 	KCSS() :
-		VAL_SAVED(), TAGS(), _thread_id() {
+		VAL_SAVED(), TAGS(), _thread_id(), _my_tag() {
 	}
 
 	template<typename T, class Enabled = void> //TODO what is Enabled for?
@@ -355,6 +351,7 @@ private:
 	uint16_t TAGS[MAX_THREAD_ID];
 
 	std::atomic<uint16_t> _thread_id;
+	std::atomic<uint16_t> _my_tag;
 
 };
 

@@ -287,7 +287,7 @@ public:
 			loc_t_b() {
 		}
 
-		loc_t(T v) :
+		loc_t(T v) : //TODO has to be T * ?
 			loc_t_b(to_value_t(v)) {
 		}
 

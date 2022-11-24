@@ -2,7 +2,7 @@
 #include <thread>
 #include <atomic>
 #include <map>
-#include <stdatomic.h>
+// #include <stdatomic.h>
 #include <cassert>
 #include <sstream>
 #include <utility>
@@ -11,20 +11,18 @@ class KCSS {
 private:
 
 	struct loc_t_b {
-		loc_t_b() :
-				tid(0), val(0) {
-		}
-		loc_t_b(uint64_t v) :
-				tid(0), val(v) {
-		}
+		loc_t_b() : //Constructor 1. Empty
+			tid(0), val(0) {}
+		loc_t_b(uint64_t v) : //Constructor 2. Known val
+			tid(0), val(v) {}
 		uint64_t tid;
 		uint64_t val;
 	};
 
 	struct TagType {
-		uint64_t tagged :1;
-		uint64_t pid :15;
-		uint64_t tag :48;
+		uint64_t tagged :1; // TODO why uint64?
+		uint64_t pid    :15;// TODO why uint64?
+		uint64_t tag    :48;
 	};
 	static_assert( sizeof(TagType) == 8 );
 
@@ -38,7 +36,7 @@ private:
 
 	uint16_t id(uint64_t v) {
 		TagType vt;
-		*reinterpret_cast<uint64_t*>(&vt) = static_cast<uint64_t>(v);
+		*reinterpret_cast<uint64_t*>(&vt) = static_cast<uint64_t>(v); //TODO is static_cast<uint64_t> needed?
 		return vt.pid;
 	}
 
@@ -58,27 +56,30 @@ private:
 		}
 	}
 
-	uint64_t create_tagged_value(uint16_t pid, uint64_t tag) {
+	uint64_t create_tagged_value(uint16_t pid, uint64_t tag) { //TODO pid is uint16 instead of uint64 (coherence)
 		TagType vt;
 		vt.pid = pid;
 		vt.tag = tag;
 		vt.tagged = 1;
 
-		return *reinterpret_cast<uint64_t*>(&vt);
+		return *reinterpret_cast<uint64_t*>(&vt); 
+		//TODO better to use memcpy or bit_cast? I don't understand the problem described in:
+		// https://en.cppreference.com/w/cpp/language/reinterpret_cast
 	}
 
-	uint16_t thread_id() {
-		thread_local static uint16_t id = _thread_id++;
+	inline uint16_t thread_id() {
+		thread_local static uint16_t id = _thread_id++; 
+		//TODO should every call to thread_id() increment it?, paper differentiates between mytag 
+		// (varies, it is used as timestamp), and mypid (fixed)
 		return id;
 	}
 
 	uint64_t ll(loc_t_b *a) {
 		while (true) {
-			TAGS[thread_id()]++;
+			TAGS[thread_id()]++; //TODO correct, except continuous increment of thread_id. Why do the operations still work?
 			uint64_t oldVal = read(a);
-			VAL_SAVED[thread_id()] = oldVal;
-			uint64_t tag_id = create_tagged_value(thread_id(),
-					TAGS[thread_id()]);
+			VAL_SAVED[thread_id()] = oldVal; //TODO same as above
+			uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]); //TODO same as above x2
 			if (CAS(&a->val, oldVal, tag_id)) {
 				a->tid = tag_id;
 				return oldVal;
@@ -87,8 +88,10 @@ private:
 	}
 
 	bool sc(loc_t_b *a, uint64_t newval) {
-		uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]);
+		uint64_t tag_id = create_tagged_value(thread_id(), TAGS[thread_id()]); //TODO same as above
 		return CAS(&a->val, tag_id, newval);
+		//TODO isn't it always going to be false bc of new thread_id values each time?, 
+		// unless threads coincide in a thread_id nr when they are each incrementing their own local variable.
 	}
 
 	void collect_taggeds_ids(const std::size_t k, loc_t_b **a, uint64_t *ta) {
@@ -127,10 +130,10 @@ private:
 public:
 
 	KCSS() :
-			VAL_SAVED(), TAGS(), _thread_id() {
+		VAL_SAVED(), TAGS(), _thread_id() {
 	}
 
-	template<typename T, class Enabled = void>
+	template<typename T, class Enabled = void> //TODO what is Enabled for?
 	struct loc_t;
 
 	// uint64_t and int64_t
@@ -143,25 +146,25 @@ public:
 			T v :63;
 		};
 
-		loc_t() :
-				loc_t_b() {
+		loc_t() : //Constructor 1. Empty
+			loc_t_b() {
 		}
 
-		loc_t(T v) :
-				loc_t_b(to_value_t(v)) {
+		loc_t(T v) : //Cosntructor 2. Known val
+			loc_t_b(to_value_t(v)) {
 		}
 
 		inline uint64_t to_value_t(T v) {
-			union {
+			union { //TODO why union, then assign values to x but then return _x?
 				bla x;
 				uint64_t _x;
 			};
-			x.p = 0;
+			x.p = 0; // TODO is this the tagged bit?
 			x.v = v;
-			return _x;
+			return _x; 
 		}
 
-		inline T from_value_t(uint64_t v) {
+		inline T from_value_t(uint64_t v) { //TODO same as above
 			union {
 				bla x;
 				uint64_t _x;
@@ -172,7 +175,7 @@ public:
 
 	};
 
-	// any numeric type of size smaller than 8 bytes
+	// any numeric type of size smaller than 8 bytes //TODO use case?
 	template<typename T>
 	struct loc_t<T,
 			std::enable_if_t<
@@ -188,7 +191,6 @@ public:
 		}
 
 		inline uint64_t to_value_t(T v) {
-
 			union {
 				struct {
 					uint8_t p;
@@ -211,6 +213,7 @@ public:
 				uint64_t a1;
 			};
 			a1 = v;
+			
 			return t.a2;
 		}
 
@@ -220,7 +223,7 @@ public:
 	// the values in the mantissa are really weird (they are very large even for small values)
 	//
 	// FIXME template<> 
-	struct loc_t<double> : loc_t_b {
+/* 	struct loc_t<double> : loc_t_b { //TODO why doesn't it compile?
 
 		loc_t() :
 				loc_t_b() {
@@ -278,18 +281,18 @@ public:
 			d1.mantisa = d2.mantisa;
 			return a1;
 		}
-	};
+	}; */
 
 	// pointers
 	template<typename T>
 	struct loc_t<T*> : loc_t_b {
 
 		loc_t() :
-				loc_t_b() {
+			loc_t_b() {
 		}
 
 		loc_t(T v) :
-				loc_t_b(to_value_t(v)) {
+			loc_t_b(to_value_t(v)) {
 		}
 
 		inline uint64_t to_value_t(T *v) {
@@ -298,6 +301,7 @@ public:
 			assert((reinterpret_cast<uint64_t>(v) & 1) == 0);// pointer must be aligned to even address
 			return reinterpret_cast<uint64_t>(v);
 		}
+		
 		inline T* from_value_t(uint64_t v) {
 			return reinterpret_cast<T*>(v);
 		}
@@ -334,7 +338,7 @@ public:
 					return false;
 				}
 			}
-
+			// Try to commit
 			if (sc(a[0], newVal)) {
 				return true;
 			}

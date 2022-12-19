@@ -4,9 +4,10 @@
 #include "kcss.h"
 #include <thread>
 #include <chrono>
+#include <bitset>
 
-using std::__1::chrono::high_resolution_clock;
-using std::__1::chrono::microseconds;
+using std::chrono::high_resolution_clock;
+using std::chrono::microseconds;
 using namespace std::chrono_literals;
 
 void test0(std::size_t n) {

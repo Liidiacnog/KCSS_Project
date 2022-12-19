@@ -42,7 +42,6 @@ private:
 		};
 		a = v;
 		return vt.pid;
-
 	}
 
 	inline void reset(loc_t_base *a) noexcept {
@@ -99,7 +98,7 @@ private:
 		return cas(&a->val, tag_id, newval);
 	}
 
-	template<std::size_t k>;
+/* 	template<std::size_t k>
 	inline constexpr void collect_tagged_ids_(loc_t_base **a,
 			uint64_t *ta) const noexcept {
 		collect_tagged_ids_<k - 1>(a, ta);
@@ -111,30 +110,30 @@ private:
 			uint64_t*) const noexcept {
 	}
 
-	template<std::size_t k>
+	template<std::size_t k, std::enable_if_t< (k > 0) >>
 	inline void collect_values_(loc_t_base **a, uint64_t *va) noexcept {
 		collect_values_<k - 1>(a, va);
 		va[k - 1] = read(a[k - 1]);
 	}
 
-	template<>
-	inline void collect_values_<0>(loc_t_base**, uint64_t*) noexcept {
+	template<std::size_t k, std::enable_if_t< (k == 0) >>
+	inline void collect_values_(loc_t_base**, uint64_t*) noexcept {
 	}
 
-	template<std::size_t k>
+	template<std::size_t k, std::enable_if_t< (k > 0) >>
 	inline bool eval_cond_(uint64_t *va, uint64_t *vb, uint64_t *ta,
 			uint64_t *tb) noexcept {
 		return eval_cond_<k - 1>(va, vb, ta, tb) && ta[k - 1] == tb[k - 1]
 				&& va[k - 1] == vb[k - 1];
 	}
 
-	template<>
-	inline bool eval_cond_<0>(uint64_t*, uint64_t*, uint64_t*,
+	template<std::size_t k, std::enable_if_t< (k == 0) >>
+	inline bool eval_cond_(uint64_t*, uint64_t*, uint64_t*,
 			uint64_t*) noexcept {
 		return true;
 	}
 
-	template<std::size_t k>
+	template<std::size_t k, std::enable_if_t< (k > 0) >>
 	inline void snapshot_(loc_t_base **a, uint64_t *va) noexcept {
 		uint64_t ta[k], tb[k];
 		uint64_t vb[k];
@@ -152,10 +151,10 @@ private:
 		return;
 	}
 
-	template<>
-	inline void snapshot_<0>(loc_t_base**, uint64_t*) noexcept {
+	template<std::size_t k, std::enable_if_t < (k == 0) >>
+	inline void snapshot_(loc_t_base**, uint64_t*) noexcept {
 	}
-
+ */
 	inline constexpr void collect_tagged_ids(const std::size_t k,
 			loc_t_base **a, uint64_t *ta) const noexcept {
 		for (unsigned int i = 0; i < k; ++i) {
@@ -191,14 +190,14 @@ private:
 		return;
 	}
 
-	template<std::size_t k>
+	template<std::size_t k, std::enable_if_t < (k > 0) >>
 	inline bool eval_kcss_cond_(uint64_t *oldValues, uint64_t *expVals) noexcept {
 		return eval_kcss_cond_<k - 1>(oldValues, expVals)
 				|| oldValues[k - 1] != expVals[k - 1];
 	}
 
-	template<>
-	inline bool eval_kcss_cond_<0>(uint64_t*, uint64_t*) noexcept {
+	template<std::size_t k, std::enable_if_t < (k == 0) >>
+	inline bool eval_kcss_cond_(uint64_t*, uint64_t*) noexcept {
 		return false;
 	}
 
@@ -301,8 +300,9 @@ public:
 //
 //   https://en.wikipedia.org/wiki/Double-precision_floating-point_format
 //
-	template<>
-	struct loc_t<double> : loc_t_base {
+	template<typename T>
+	struct loc_t<T,  //TODO does this work?
+					std::enable_if_t<std::is_same_v<T, double>>> : loc_t_base {
 
 		loc_t() noexcept :
 				loc_t_base() {
@@ -390,19 +390,19 @@ public:
 		while (true) {
 			oldValues[0] = ll(a[0]);
 
-			snapshot_<k - 1>(a + 1, oldValues + 1);
+			/* snapshot_<k - 1>(a + 1, oldValues + 1);
 			if (eval_kcss_cond_<k>(oldValues, expVals)) {
 				sc(a[0], oldValues[0]);
 				return false;
-			}
+			} */
 
-//			snapshot(k - 1, a + 1, oldValues + 1);
-//			for (unsigned int i = 0; i < k; ++i) {
-//				if (oldValues[i] != expVals[i]) {
-//					sc(a[0], oldValues[0]);
-//					return false;
-//				}
-//			}
+			snapshot(k - 1, a + 1, oldValues + 1);
+			for (unsigned int i = 0; i < k; ++i) {
+				if (oldValues[i] != expVals[i]) {
+ 				sc(a[0], oldValues[0]);
+					return false;
+				}
+			}
 
 			if (sc(a[0], newVal)) {
 				return true;
@@ -420,6 +420,5 @@ private:
 	uint16_t TAGS[MAX_THREAD_ID];
 
 	std::atomic<uint16_t> _thread_id;
-
 };
 

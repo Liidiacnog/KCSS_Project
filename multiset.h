@@ -1,13 +1,13 @@
-#include "kcss.h"
+#ifndef kcss_h
+    #define kcss_h
+    #include "kcss.h"
+#endif
 
 template<typename T>
 class Multiset {
 private:
 
     struct node{
-        node(const T& newkey, node* newnext) :
-			key(newkey), count(1), next(newnext) {
-		}
         T key;
         KCSS::loc_t<uint64_t> count; //multiplicity of key in the set
         KCSS::loc_t<node*> next;
@@ -80,6 +80,16 @@ public:
     **/
     struct node* first;
     struct node* last;
+
+    Multiset(uint64_t minVal, uint64_t maxVal){
+        last->key = maxVal;
+        kcss.kcss(&last->count, last->count, 1);//TODO should succeed, should be safe operation
+        kcss.kcss(&last->next, last->next, nullptr);
+        
+        first->key = minVal;
+        kcss.kcss(&first->count, first->count, 1);//TODO should succeed, should be safe operation
+        kcss.kcss(&first->next, first->next, last);
+	}
 
 
     //returns the multiplicity of a given key; 

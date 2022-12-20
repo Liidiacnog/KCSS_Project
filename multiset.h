@@ -21,9 +21,12 @@ private:
      * prev->next to curr_next, and returns the pointer to prev.
      **/
     node* remove_node(node* prev, node* curr, node* curr_next){
-        kcss.kcss(prev->next, curr, curr_next, 
-            (prev->next, curr), (&prev->count, prev->count),  //TODO okay specified like this?
-             (curr->next, curr_next), (&curr->count, 0)); //(mem.positions to check, expvals)    
+        bool kcss_res = kcss.kcss(&prev->next, curr, curr_next, 
+            (&prev->count, prev->count),  //TODO args are okay specified like this?
+             (&curr->next, curr_next), (&curr->count, 0)); //(mem.positions to check, expvals)    
+        if(kcss_res){
+            free(curr);
+        }//TODO something else?
     }
 
 
@@ -95,8 +98,30 @@ public:
      *  the multiplicity of the key before the insertion;
     **/
     uint64_t insert(const T& given_key){
-        //TODO insert
-        return 0;
+        std::pair<node*, node*> pair_prev_cur = search(given_key);
+        node* cur_node = pair_prev_cur.second;
+        node* prev_node = pair_prev_cur.first;
+        if(cur_node->key == given_key){
+            uint64_t oldcount = kcss.read(&cur_node->count);
+            while(oldcount > 0){
+                if(kcss.kcss(&cur_node->count, oldcount, oldcount + 1)){
+                    return oldcount;
+                }
+                oldcount = kcss.read(&cur_node->count);
+            }
+            return insert(given_key); //retry insertion 
+        }else{//insert from scratch
+            uint64_t prevnode_count = kcss.read(&prev_node->count);
+            if(prevnode_count == 0){
+                return insert(given_key); //retry insertion 
+            }
+            node new_node = new node(given_key, last);
+            if(kcss.kcss(&prev_node->next, cur_node, new_node, (&prev_node->count, prevnode_count))){
+                return 0; 
+            }else{
+                return insert(given_key);
+            }            
+        }
     }
 
     /**

@@ -1,4 +1,4 @@
-#include <kcss.h>
+#include "kcss.h"
 
 template<typename T>
 class Multiset {
@@ -22,8 +22,8 @@ private:
      **/
     node* remove_node(node* prev, node* curr, node* curr_next){
         kcss.kcss(prev->next, curr, curr_next, 
-            [(prev->next, curr), (&prev->count, prev->count),  //TODO okay specified like this?
-             (curr->next, curr_next), (&curr->count, 0)]); //(mem.positions to check, expvals)    
+            (prev->next, curr), (&prev->count, prev->count),  //TODO okay specified like this?
+             (curr->next, curr_next), (&curr->count, 0)); //(mem.positions to check, expvals)    
     }
 
 
@@ -43,24 +43,24 @@ private:
         }
 
         node* prev_node = first;
-        node* cur_node = (node*) kcss.read(KCSS::loc_t<node*>(prev_node->next));
-        uint64_t cur_count = kcss.read(KCSS::loc_t<uint64_t>(cur_node->count));
+        node* cur_node = (node*) kcss.read(prev_node->next);
+        uint64_t cur_count = kcss.read(cur_node->count);
 
         while(cur_node != nullptr && cur_node->key < given_key){ //TODO do we have to use .equals?
             if(cur_count == 0){
-                uint64_t prev_count = kcss.read(KCSS::loc_t<uint64_t>(prev_node->count));
+                uint64_t prev_count = kcss.read(prev_node->count);
                 if(prev_count == 0){
                     return search(given_key);//restart search()
                 }else{
-                    node* curr_next = (node*) kcss.read(KCSS::loc_t<node*>(cur_node->next)); 
+                    node* curr_next = (node*) kcss.read(cur_node->next); 
                     prev_node = remove_node(prev_node, cur_node, curr_next);
                 }
             }else{
                 prev_node = cur_node;
             }
             //cur_node is prev_node->next bc prev_node has been updated in else{} or in remove_node to already become cur_node 
-            cur_node = (node*) kcss.read(KCSS::loc_t<node*>(prev_node->next)); 
-            cur_count = kcss.read(KCSS::loc_t<uint64_t>(cur_node->count));
+            cur_node = (node*) kcss.read(prev_node->next); 
+            cur_count = kcss.read(cur_node->count);
         }
 
         return std::pair<node*, node*>(prev_node, cur_node);
@@ -80,16 +80,23 @@ public:
 
 
     //returns the multiplicity of a given key; 
-    uint64_t multiplicity(const T& key){
-        //TODO multiplicity
+    uint64_t multiplicity(const T& given_key){
+        std::pair<node*, node*> pair_prev_cur = search(given_key);
+        node* cur_node = pair_prev_cur.second;
+        if(cur_node->key == given_key){
+            return kcss.read(&cur_node->count);
+        }else{
+            return 0;
+        }
     }
 
     /**
      * increases the multiplicity of a given key by 1 and returns
      *  the multiplicity of the key before the insertion;
     **/
-    uint64_t insert(const T& key){
+    uint64_t insert(const T& given_key){
         //TODO insert
+        return 0;
     }
 
     /**
@@ -97,7 +104,21 @@ public:
      * the multiplicity is already 0 prior to the deletion) and
      *  returns the multiplicity of the key before the deletion.
     */
-    uint64_t delete(const T& key){
-        //TODO delete
+    uint64_t deleteKey(const T& given_key){
+        std::pair<node*, node*> pair_prev_cur = search(given_key);
+        node* cur_node = pair_prev_cur.second;
+        node* prev_node = pair_prev_cur.first;
+        if(cur_node->key == given_key){
+            uint64_t oldcount = kcss.read(&cur_node->count);
+            while(oldcount > 0){
+                if(kcss.kcss(&cur_node->count, oldcount, oldcount - 1)){
+                    return oldcount;
+                }
+                oldcount = kcss.read(&cur_node->count);
+            }
+            return 0;
+        }else{ //node with given_key not found
+            return 0;
+        }
     }
 };
